@@ -11,16 +11,31 @@ const TIMEOUT_MS = 30_000;
 const number = (value) =>
   value === null || value === undefined || value === '' ? null : Number(value);
 
+/** Kilograms in one pack, when the pack is sold by weight ("1 Kg", "0.25 Kg (240-260g)", "500 gm"). */
+export function packKg(displayQuantity, displayName) {
+  const size = number(displayQuantity);
+  if (!size || !displayName) return null;
+  if (/^kgs?\b/i.test(displayName.trim())) return size;
+  if (/^(g|gm|gms|grams?)\b/i.test(displayName.trim())) return size / 1000;
+  return null;
+}
+
+export const formatKg = (kg) => (kg >= 1 ? `${+kg.toFixed(3)} kg` : `${Math.round(kg * 1000)} g`);
+
 export function product(source) {
   const other = source.other_data || {};
+  const unit = [other.display_quantity, other.display_name].filter(Boolean).join(' ') || null;
+  const price = number(source.price?.total_price);
   return {
     id: source.id,
     name: source.name,
     categoryId: source.category_id,
-    price: number(source.price?.total_price),
+    price,
+    priceLabel: price === null ? null : `₹${price} per ${unit || 'unit'}`,
     basePrice: number(source.price?.base_price),
     tax: number(source.price?.tax),
-    unit: [other.display_quantity, other.display_name].filter(Boolean).join(' ') || null,
+    unit,
+    packKg: packKg(other.display_quantity, other.display_name),
     available: Boolean(source.is_available) && !source.sold_out,
     stock: number(source.stock_count),
     onOffer: other.on_offer === '1' || source.on_offer === true,
@@ -230,17 +245,57 @@ export class SimplyVeggieClient {
     };
   }
 
+  /** Products of the account's catalogue by id (unavailable ones included), as a Map. */
+  async productsByIds(ids) {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (!unique.length) return new Map();
+    const catalog = await this.accountCatalog();
+    let response;
+    try {
+      response = await this.fetch(`${SEARCH}/${MERCHANT_ID}_category_items/_search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          size: unique.length,
+          query: {
+            bool: {
+              must: [{ terms: { id: unique } }, { match_phrase: { catalog_id: catalog.id } }],
+            },
+          },
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch {
+      throw new ServiceError(
+        'SITE_UNAVAILABLE',
+        'Product lookup did not respond; try again shortly.',
+      );
+    }
+    if (!response.ok)
+      throw new ServiceError(
+        'SITE_UNAVAILABLE',
+        `Product lookup failed (HTTP ${response.status}).`,
+      );
+    const data = await response.json();
+    return new Map((data.hits?.hits || []).map((hit) => [hit._source.id, product(hit._source)]));
+  }
+
   cart() {
     return this.json('GET', '/user/v0/cart.json');
   }
 
-  async setCartQuantity({ itemId, quantity, variationId }) {
+  /** Cart in rupees, each line annotated with its pack size and total weight. */
+  async cartDetails() {
     const cart = await this.cart();
-    const line = cartLines(cart).find(
-      (l) => l.item_id === itemId && (!variationId || (l.variation_id || '') === variationId),
-    );
+    const view = cartView(cart);
+    const products = await this.productsByIds(view.items.map((line) => line.itemId));
+    view.items = view.items.map((line) => withPack(line, products.get(line.itemId)));
+    return view;
+  }
+
+  async changeLine(line, { itemId, quantity, variationId }) {
     if (quantity === 0) {
-      if (!line) return this.cart();
+      if (!line) return;
       await this.json('PUT', '/user/v0/cart/remove_item.json', {
         body: { cart: { line_item_id: line.id } },
       });
@@ -260,7 +315,85 @@ export class SimplyVeggieClient {
         },
       });
     }
+  }
+
+  async setCartQuantity({ itemId, quantity, variationId }) {
+    const cart = await this.cart();
+    await this.changeLine(findLine(cart, itemId, variationId), { itemId, quantity, variationId });
     return this.cart();
+  }
+
+  /**
+   * Adds (or sets) several products in one call. Each request gives packs (`quantity`) or a
+   * weight (`weightKg`, converted to whole packs). Every product is checked against the
+   * account's catalogue first; nothing is changed for a request that fails validation.
+   */
+  async addItems(requests, { mode = 'add' } = {}) {
+    const products = await this.productsByIds(requests.map((r) => r.itemId));
+    const planned = new Map(),
+      results = [];
+    for (const request of requests) {
+      const item = products.get(request.itemId);
+      const fail = (message) =>
+        results.push({
+          itemId: request.itemId,
+          name: item?.name ?? null,
+          status: 'FAILED',
+          message,
+        });
+      if (!item) {
+        fail('Not in this account’s catalogue; search again.');
+        continue;
+      }
+      if (!item.available) {
+        fail('Currently unavailable.');
+        continue;
+      }
+      const packs = packsFor(request, item);
+      if (packs.error) {
+        fail(packs.error);
+        continue;
+      }
+      const key = `${item.id}|${request.variationId || ''}`;
+      planned.set(key, {
+        item,
+        variationId: request.variationId,
+        packs: (planned.get(key)?.packs || 0) + packs.value,
+      });
+    }
+    const cart = await this.cart();
+    for (const { item, variationId, packs } of planned.values()) {
+      const line = findLine(cart, item.id, variationId);
+      const previous = number(line?.quantity) || 0;
+      const target = mode === 'set' ? packs : previous + packs;
+      try {
+        await this.changeLine(line, { itemId: item.id, quantity: target, variationId });
+        results.push({
+          itemId: item.id,
+          name: item.name,
+          status: line ? 'UPDATED' : 'ADDED',
+          previous,
+          target,
+        });
+      } catch (error) {
+        results.push({
+          itemId: item.id,
+          name: item.name,
+          status: 'FAILED',
+          message: error.message,
+        });
+      }
+    }
+    const view = await this.cartDetails();
+    for (const result of results) {
+      if (result.status === 'FAILED') continue;
+      const line = view.items.find((l) => l.itemId === result.itemId);
+      result.verified = Number(line?.quantity) === result.target;
+      result.inCart = line
+        ? { packs: line.quantity, amount: line.amount, total: line.total }
+        : null;
+    }
+    return { results, cart: view };
   }
 
   async orders({ page = 1 } = {}) {
@@ -272,6 +405,19 @@ export class SimplyVeggieClient {
   async order(orderId) {
     const data = await this.json('GET', `/user/v0/orders/${encodeURIComponent(orderId)}.json`);
     return orderDetail(data.order ?? data);
+  }
+
+  /** Accepts the internal id or the order number shown to customers (e.g. 202610260092). */
+  async resolveOrderId(reference) {
+    const ref = String(reference).trim().replace(/^#/, '');
+    if (/^[a-f0-9]{24}$/i.test(ref)) return ref;
+    for (let page = 1; page <= 20; page++) {
+      const { orders } = await this.orders({ page });
+      const match = orders.find((o) => o.number === ref);
+      if (match) return match.id;
+      if (!orders.length) break;
+    }
+    throw new ServiceError('NOT_FOUND', `No order numbered ${ref} was found in this account.`);
   }
 
   async invoice(orderId) {
@@ -296,6 +442,46 @@ export class SimplyVeggieClient {
     }
     return Buffer.from(await response.arrayBuffer());
   }
+}
+
+function findLine(cart, itemId, variationId) {
+  return cartLines(cart).find(
+    (l) => l.item_id === itemId && (!variationId || (l.variation_id || '') === variationId),
+  );
+}
+
+/** Whole packs for a request given in packs or kilograms. */
+export function packsFor({ quantity, weightKg }, item) {
+  if (weightKg !== undefined) {
+    if (!item.packKg)
+      return {
+        error: `Sold per ${item.unit || 'unit'}, not by weight; give quantity in ${item.unit || 'units'}.`,
+      };
+    const packs = weightKg / item.packKg;
+    const whole = Math.round(packs);
+    if (whole < 1 || Math.abs(packs - whole) > 1e-6) {
+      const below = Math.max(1, Math.floor(packs)),
+        above = Math.ceil(packs);
+      return {
+        error: `Sold in ${formatKg(item.packKg)} packs, so ${formatKg(weightKg)} is not a whole number of packs. Use ${formatKg(below * item.packKg)} (${below} packs) or ${formatKg(above * item.packKg)} (${above} packs).`,
+      };
+    }
+    return { value: whole };
+  }
+  if (!Number.isInteger(quantity) || quantity < 1)
+    return { error: 'quantity must be a whole number of packs (1 or more).' };
+  return { value: quantity };
+}
+
+function withPack(line, item) {
+  if (!item) return { ...line, unit: null, amount: null };
+  const kg = item.packKg && line.quantity ? item.packKg * line.quantity : null;
+  return {
+    ...line,
+    name: line.name ?? item.name,
+    unit: item.unit,
+    amount: kg ? formatKg(kg) : `${line.quantity} × ${item.unit || 'unit'}`,
+  };
 }
 
 /** Line items of a cart response, whichever envelope the API uses. */
@@ -343,6 +529,8 @@ export function orderSummary(order) {
     paymentStatus: order.payment_status || null,
     paymentMode: order.payment_mode || order.payment_type || null,
     createdAt: order.created_at,
+    acceptedAt: order.accepted_at || null,
+    dispatchedAt: order.dispatched_at || null,
     deliverySlot:
       order.time_slot_value ||
       (order.delivery_slot_start_time

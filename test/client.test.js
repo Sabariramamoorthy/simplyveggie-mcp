@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SimplyVeggieClient, product, cartLines, cartView } from '../src/client.js';
+import {
+  SimplyVeggieClient,
+  product,
+  cartLines,
+  cartView,
+  packKg,
+  packsFor,
+} from '../src/client.js';
 
 class MemoryStore {
   data = {};
@@ -35,7 +42,11 @@ function fakeSite({ cart = { line_items: [] } } = {}) {
     if (path === '/me.json') return json(200, { name: 'Kitchen', catalog_type: 'common' });
     if (path === '/catalog/structure.json')
       return new URL(url).searchParams.get('filter') === 'common'
-        ? json(200, { id: 'BASE', name: 'Base Catalog', categories: [{ id: 'V', name: 'Vegetables', categories: [] }] })
+        ? json(200, {
+            id: 'BASE',
+            name: 'Base Catalog',
+            categories: [{ id: 'V', name: 'Vegetables', categories: [] }],
+          })
         : json(200, { id: 'MENU', name: 'Menu', categories: [] });
     if (path === '/user/v0/cart.json') return json(200, cart);
     if (path === '/user/v0/cart/add_item.json') {
@@ -147,11 +158,33 @@ test('converts cart amounts from paise to rupees', () => {
     item_count: 1,
     sub_total_price: 6600,
     total_price: 6600,
-    items: [{ id: 'L1', item_id: 'P1', name: 'Tomato', quantity: 2, rate: 3300, total_price: 6600 }],
+    items: [
+      { id: 'L1', item_id: 'P1', name: 'Tomato', quantity: 2, rate: 3300, total_price: 6600 },
+    ],
   });
   assert.equal(view.total, 66);
   assert.equal(view.items[0].rate, 33);
   assert.equal(view.items[0].total, 66);
+});
+
+test('reads pack weight from the unit label', () => {
+  assert.equal(packKg('0.25', 'Kg'), 0.25);
+  assert.equal(packKg('1', 'Kg (950-1050gm)'), 1);
+  assert.equal(packKg('500', 'gm'), 0.5);
+  assert.equal(packKg('1', 'Box (50gm)'), null);
+  assert.equal(packKg('1', 'Pc (180-200g/Pc)'), null);
+});
+
+test('converts a requested weight into whole packs', () => {
+  const quarterKg = { unit: '0.25 Kg', packKg: 0.25 };
+  assert.deepEqual(packsFor({ weightKg: 2 }, quarterKg), { value: 8 });
+  assert.match(
+    packsFor({ weightKg: 1.1 }, quarterKg).error,
+    /1 kg \(4 packs\) or 1\.25 kg \(5 packs\)/,
+  );
+  assert.match(packsFor({ weightKg: 2 }, { unit: '1 Pc', packKg: null }).error, /not by weight/);
+  assert.deepEqual(packsFor({ quantity: 3 }, quarterKg), { value: 3 });
+  assert.match(packsFor({ quantity: 1.5 }, quarterKg).error, /whole number/);
 });
 
 test('normalizes a catalogue search hit', () => {
