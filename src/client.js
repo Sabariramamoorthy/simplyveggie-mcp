@@ -304,23 +304,27 @@ export function cartLines(cart) {
   return root.line_items ?? root.items ?? [];
 }
 
+// The cart API reports money in paise; catalogue and order APIs use rupees.
+const rupees = (paise) => (number(paise) === null ? null : number(paise) / 100);
+
 export function cartView(cart) {
   const root = cart?.cart ?? cart?.data ?? cart ?? {};
   return {
+    currency: 'INR',
     itemCount: number(root.item_count) ?? cartLines(cart).length,
-    subTotal: number(root.sub_total_price),
-    charges: number(root.total_charges),
-    taxes: number(root.total_taxes),
-    discounts: number(root.total_discounts),
-    total: number(root.total_price),
+    subTotal: rupees(root.sub_total_price),
+    charges: rupees(root.total_charges),
+    taxes: rupees(root.total_taxes),
+    discounts: rupees(root.total_discounts),
+    total: rupees(root.total_price),
     items: cartLines(cart).map((line) => ({
       lineId: line.id,
       itemId: line.item_id,
       variationId: line.variation_id || null,
       name: line.name ?? line.item_name ?? null,
       quantity: number(line.quantity),
-      rate: number(line.rate ?? line.price ?? line.unit_price),
-      total: number(line.total_price ?? line.total_amount),
+      rate: rupees(line.rate ?? line.price ?? line.unit_price),
+      total: rupees(line.total_price ?? line.total_amount),
     })),
     invalidItems: (root.invalid_line_items || []).map((line) => ({
       itemId: line.item_id,

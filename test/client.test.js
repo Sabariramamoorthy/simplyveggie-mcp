@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SimplyVeggieClient, product, cartLines } from '../src/client.js';
+import { SimplyVeggieClient, product, cartLines, cartView } from '../src/client.js';
 
 class MemoryStore {
   data = {};
@@ -140,6 +140,18 @@ test("selects the account's catalogue by its catalog_type", async () => {
   const catalog = await client.accountCatalog();
   assert.equal(catalog.id, 'BASE');
   assert.equal(catalog.categories[0].name, 'Vegetables');
+});
+
+test('converts cart amounts from paise to rupees', () => {
+  const view = cartView({
+    item_count: 1,
+    sub_total_price: 6600,
+    total_price: 6600,
+    items: [{ id: 'L1', item_id: 'P1', name: 'Tomato', quantity: 2, rate: 3300, total_price: 6600 }],
+  });
+  assert.equal(view.total, 66);
+  assert.equal(view.items[0].rate, 33);
+  assert.equal(view.items[0].total, 66);
 });
 
 test('normalizes a catalogue search hit', () => {
