@@ -168,12 +168,17 @@ export class SimplyVeggieClient {
     return this.user;
   }
 
-  /** The catalogue (price list) the signed-in account buys from. */
+  /**
+   * The catalogue (price list) the signed-in account buys from. The site selects it with the
+   * account's `catalog_type` as the structure filter; unfiltered, it returns an empty "Menu".
+   */
   async accountCatalog() {
     if (this.catalog) return this.catalog;
+    const user = this.user?.catalog_type !== undefined ? this.user : await this.me();
+    const filter = user.catalog_type ? `&filter=${encodeURIComponent(user.catalog_type)}` : '';
     const data = await this.json(
       'GET',
-      `/catalog/structure.json?top_level_categories=true&merchant_id=${MERCHANT_ID}`,
+      `/catalog/structure.json?top_level_categories=true&merchant_id=${MERCHANT_ID}${filter}`,
     );
     const categories = (list = []) =>
       list.map((c) => ({ id: c.id, name: c.name, categories: categories(c.categories) }));
@@ -258,12 +263,15 @@ export class SimplyVeggieClient {
     return this.cart();
   }
 
-  orders({ page = 1 } = {}) {
-    return this.json('GET', `/user/v0/orders.json?page_no=${page}`);
+  async orders({ page = 1 } = {}) {
+    const data = await this.json('GET', `/user/v0/orders.json?page_no=${page}`);
+    const list = Array.isArray(data) ? data : (data.orders ?? []);
+    return { totalCount: number(data.total_count), orders: list.map(orderSummary) };
   }
 
-  order(orderId) {
-    return this.json('GET', `/user/v0/orders/${encodeURIComponent(orderId)}.json`);
+  async order(orderId) {
+    const data = await this.json('GET', `/user/v0/orders/${encodeURIComponent(orderId)}.json`);
+    return orderDetail(data.order ?? data);
   }
 
   async invoice(orderId) {
@@ -294,4 +302,84 @@ export class SimplyVeggieClient {
 export function cartLines(cart) {
   const root = cart?.cart ?? cart?.data ?? cart ?? {};
   return root.line_items ?? root.items ?? [];
+}
+
+export function cartView(cart) {
+  const root = cart?.cart ?? cart?.data ?? cart ?? {};
+  return {
+    itemCount: number(root.item_count) ?? cartLines(cart).length,
+    subTotal: number(root.sub_total_price),
+    charges: number(root.total_charges),
+    taxes: number(root.total_taxes),
+    discounts: number(root.total_discounts),
+    total: number(root.total_price),
+    items: cartLines(cart).map((line) => ({
+      lineId: line.id,
+      itemId: line.item_id,
+      variationId: line.variation_id || null,
+      name: line.name ?? line.item_name ?? null,
+      quantity: number(line.quantity),
+      rate: number(line.rate ?? line.price ?? line.unit_price),
+      total: number(line.total_price ?? line.total_amount),
+    })),
+    invalidItems: (root.invalid_line_items || []).map((line) => ({
+      itemId: line.item_id,
+      name: line.name ?? null,
+      reason: line.reason ?? line.message ?? null,
+    })),
+  };
+}
+
+export function orderSummary(order) {
+  return {
+    id: order.id,
+    number: order.friendly_id,
+    status: order.status,
+    deliveryStatus: order.delivery_status || null,
+    paymentStatus: order.payment_status || null,
+    paymentMode: order.payment_mode || order.payment_type || null,
+    createdAt: order.created_at,
+    deliverySlot:
+      order.time_slot_value ||
+      (order.delivery_slot_start_time
+        ? `${order.delivery_slot_start_time} – ${order.delivery_slot_end_time}`
+        : null),
+    deliveredAt: order.delivered_at || null,
+    itemCount: number(order.no_of_items),
+    totalAmount: number(order.total_amount),
+    balanceAmount: number(order.balance_amount),
+    invoiceNumber: order.invoice_number || null,
+  };
+}
+
+export function orderDetail(order) {
+  return {
+    ...orderSummary(order),
+    amounts: {
+      gross: number(order.gross_amount),
+      bill: number(order.bill_amount),
+      tax: number(order.tax_amount),
+      discount: number(order.discount),
+      deliveryCharge: number(order.delivery_charge),
+      packingCharge: number(order.packing_charge),
+      returned: number(order.returned_amount),
+      undelivered: number(order.undelivered_amount),
+      total: number(order.total_amount),
+    },
+    instructions: order.instructions || null,
+    items: (order.items || []).map((item) => ({
+      itemId: item.item_id,
+      name: item.name,
+      quantity: number(item.quantity),
+      deliveredQuantity: number(item.delivered_quantity),
+      returnedQuantity: number(item.returned_quantity),
+      rate: number(item.rate),
+      total: number(item.total_amount ?? item.total_price),
+      tax: number(item.total_tax),
+      discount: number(item.discount_amount),
+      undeliveredAmount: number(item.undelivered_amount),
+      returnedAmount: number(item.returned_amount),
+      status: item.status || null,
+    })),
+  };
 }

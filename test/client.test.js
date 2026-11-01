@@ -32,6 +32,11 @@ function fakeSite({ cart = { line_items: [] } } = {}) {
     }
     if (init.headers?.Cookie !== `_session=${session}`)
       return json(401, { error: 'unauthenticated' });
+    if (path === '/me.json') return json(200, { name: 'Kitchen', catalog_type: 'common' });
+    if (path === '/catalog/structure.json')
+      return new URL(url).searchParams.get('filter') === 'common'
+        ? json(200, { id: 'BASE', name: 'Base Catalog', categories: [{ id: 'V', name: 'Vegetables', categories: [] }] })
+        : json(200, { id: 'MENU', name: 'Menu', categories: [] });
     if (path === '/user/v0/cart.json') return json(200, cart);
     if (path === '/user/v0/cart/add_item.json') {
       cart.line_items.push({ id: 'L1', item_id: body.cart.item_id, quantity: body.cart.quantity });
@@ -122,6 +127,19 @@ test('set quantity adds, updates, then removes the same line', async () => {
     '/user/v0/cart/update_item.json',
     '/user/v0/cart/remove_item.json',
   ]);
+});
+
+test("selects the account's catalogue by its catalog_type", async () => {
+  const site = fakeSite();
+  const client = new SimplyVeggieClient({
+    phone: '9000000000',
+    password: 'right',
+    store: new MemoryStore(),
+    fetchImpl: site.fetchImpl,
+  });
+  const catalog = await client.accountCatalog();
+  assert.equal(catalog.id, 'BASE');
+  assert.equal(catalog.categories[0].name, 'Vegetables');
 });
 
 test('normalizes a catalogue search hit', () => {

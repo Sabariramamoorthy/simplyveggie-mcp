@@ -2,7 +2,7 @@ import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { SimplyVeggieClient, SITE, cartLines } from './client.js';
+import { SimplyVeggieClient, SITE, cartLines, cartView } from './client.js';
 import { JsonStore, SerialQueue, ServiceError, sameSecret } from './core.js';
 
 process.umask(0o077);
@@ -119,7 +119,7 @@ function mcp() {
     },
   );
   register('get_cart', 'Read the current cart, quantities and totals.', {}, async () =>
-    result({ cart: await client.cart() }),
+    result({ cart: cartView(await client.cart()) }),
   );
   register(
     'set_cart_quantity',
@@ -134,7 +134,7 @@ function mcp() {
       const line = cartLines(cart).find((l) => l.item_id === a.itemId);
       return result({
         verified: a.quantity === 0 ? !line : Number(line?.quantity) === a.quantity,
-        cart,
+        cart: cartView(cart),
         placeOrder: `Review and place the order yourself at ${SITE}.`,
       });
     },
@@ -144,7 +144,7 @@ function mcp() {
     'list_orders',
     'List past and upcoming orders, newest first. Use page to go further back.',
     { page: z.number().int().min(1).max(200).optional() },
-    async (a) => result({ page: a.page ?? 1, orders: await client.orders({ page: a.page ?? 1 }) }),
+    async (a) => result({ page: a.page ?? 1, ...(await client.orders({ page: a.page ?? 1 })) }),
   );
   register(
     'get_order',
