@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openship.io/openship.schema.json",
+  "framework": "docker",
+  "runtime": "docker",
+  "composePath": "docker-compose.yml",
+  "startCommand": "node src/server.js",
+  "port": 9320
+}

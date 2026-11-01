@@ -1,0 +1,8 @@
+node_modules/
+runtime/
+.secrets/
+.private/
+data/
+profile/
+downloads/
+package-lock.json

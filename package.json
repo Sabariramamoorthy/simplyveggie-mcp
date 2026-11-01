@@ -1,0 +1,31 @@
+{
+  "name": "simplyveggie-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single-account Simply Veggie MCP: catalogue search, cart preparation and order history",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "test": "node --test test/*.test.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "keywords": [
+    "mcp",
+    "simplyveggie",
+    "procurement",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.9.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "express": "5.2.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "prettier": "3.9.8"
+  }
+}

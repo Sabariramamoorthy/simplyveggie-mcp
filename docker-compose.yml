@@ -1,0 +1,37 @@
+# Openship deploy stack (CloudShift HP Mini Elite). TLS ends at the VPS Caddy; the Openship
+# edge forwards to the app on 9320. Every value comes from Openship service env.
+# EXACTLY ONE instance: one Simply Veggie account and one cart.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      HOST: '0.0.0.0'
+      PORT: '9320'
+      DATA_DIR: /data
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      MCP_TOKEN: ${MCP_TOKEN}
+      SIMPLYVEGGIE_PHONE: ${SIMPLYVEGGIE_PHONE:-}
+      SIMPLYVEGGIE_PASSWORD: ${SIMPLYVEGGIE_PASSWORD:-}
+    ports:
+      - '${APP_PORT:-9320}:9320'
+    volumes:
+      - simplyveggie-data:/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:9320/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  simplyveggie-data:
