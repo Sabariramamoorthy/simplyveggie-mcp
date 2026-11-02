@@ -1,5 +1,7 @@
 # Openship deploy stack (CloudShift HP Mini Elite). TLS ends at the VPS Caddy; the Openship
-# edge forwards to the app on 9320. Every value comes from Openship service env.
+# edge forwards to the app on 9320. All application config (PUBLIC_ORIGIN, MCP_TOKEN, OWNER_KEY,
+# SIMPLYVEGGIE_PHONE, SIMPLYVEGGIE_PASSWORD) is read at runtime from the Infisical project below;
+# only the read-only machine identity is set on the service.
 # EXACTLY ONE instance: one Simply Veggie account and one cart.
 services:
   app:
@@ -11,11 +13,11 @@ services:
       HOST: '0.0.0.0'
       PORT: '9320'
       DATA_DIR: /data
-      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
-      MCP_TOKEN: ${MCP_TOKEN}
-      OWNER_KEY: ${OWNER_KEY:-}
-      SIMPLYVEGGIE_PHONE: ${SIMPLYVEGGIE_PHONE:-}
-      SIMPLYVEGGIE_PASSWORD: ${SIMPLYVEGGIE_PASSWORD:-}
+      INFISICAL_URL: ${INFISICAL_URL:-https://infisical.app.cloudshiftsolutions.in}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID}
+      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
+      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID}
+      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET}
     ports:
       - '${APP_PORT:-9320}:9320'
     volumes:

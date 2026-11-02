@@ -77,6 +77,8 @@ cp .env.example .env   # PUBLIC_ORIGIN, MCP_TOKEN, OWNER_KEY, SIMPLYVEGGIE_PHONE
 npm start
 ```
 
+**Config from Infisical (optional).** Set `INFISICAL_URL`, `INFISICAL_PROJECT_ID`, `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a universal-auth machine identity with read access to that project only; `INFISICAL_ENVIRONMENT` defaults to `prod`) and keep every other value in Infisical. The server reads them at startup and checks every minute; when a value changes it restarts itself to apply it. Keys absent from Infisical fall back to the environment.
+
 Listens on `127.0.0.1:9320`; put it behind HTTPS at the origin root (OAuth discovery lives under `/.well-known/`). The Simply Veggie session cookie and OAuth clients/tokens (hashed) are stored in `DATA_DIR` with owner-only permissions. Docker: `docker-compose.yml` keeps `DATA_DIR` on a volume.
 
 ## Development

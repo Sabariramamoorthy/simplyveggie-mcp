@@ -11,8 +11,16 @@ import { z } from 'zod';
 import { SimplyVeggieClient, SITE } from './client.js';
 import { JsonStore, SerialQueue, ServiceError, digest, sameSecret } from './core.js';
 import { OwnerOAuthProvider } from './oauth.js';
+import { loadConfig } from './infisical.js';
 
 process.umask(0o077);
+await loadConfig([
+  'PUBLIC_ORIGIN',
+  'MCP_TOKEN',
+  'OWNER_KEY',
+  'SIMPLYVEGGIE_PHONE',
+  'SIMPLYVEGGIE_PASSWORD',
+]);
 const config = {
   dataDir: process.env.DATA_DIR || './data',
   publicOrigin: process.env.PUBLIC_ORIGIN,
